@@ -1,0 +1,1 @@
+# hedgineer-equal-weight-stock

@@ -11,7 +11,7 @@ pytest-cov==4.1.0
 ruff==0.1.6
 httpx==0.25.2
 aiohttp==3.8.6
-yfinance==0.2.28
+yfinance==0.2.40
 polars==0.20.3
 pandas==2.1.4
 openpyxl==3.1.2

@@ -12,6 +12,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - DUCKDB_PATH=/app/data/hedgineer.db
+      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

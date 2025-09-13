@@ -6,7 +6,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from container import index_controller, cron_scheduler
 
-# Add migrations to path
 sys.path.append(str(Path(__file__).parent / "migrations"))
 from migrations.migration_runner import run_migrations
 

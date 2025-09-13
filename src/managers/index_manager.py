@@ -18,7 +18,7 @@ class IndexManager:
         if cached_data:
             return [IndexPerformance.model_validate(item) for item in cached_data]
         
-        performance_data = await self.index_service.repository.get_persisted_index_performance(start_date, end_date)
+        performance_data = await self.index_service.get_persisted_index_performance(start_date, end_date)
         
         if performance_data:
             serializable_data = [perf.model_dump() for perf in performance_data]
@@ -31,7 +31,7 @@ class IndexManager:
         if cached_data:
             return [IndexComposition.model_validate(item) for item in cached_data]
         
-        composition_data = await self.index_service.repository.get_persisted_index_composition(target_date)
+        composition_data = await self.index_service.get_persisted_index_composition(target_date)
         
         if composition_data:
             serializable_data = [comp.model_dump() for comp in composition_data]
@@ -49,37 +49,40 @@ class IndexManager:
         previous_symbols = set()
         
         while current_date <= end_date:
-            if current_date.weekday() < 5:
-                composition = await self.index_service.repository.get_persisted_index_composition(current_date)
+            if current_date.weekday() >= 5:
+                current_date += timedelta(days=1)
+                continue
+            
+            composition = await self.index_service.get_persisted_index_composition(current_date)
+            
+            if composition:
+                current_symbols = {stock.symbol for stock in composition}
                 
-                if composition:
-                    current_symbols = {stock.symbol for stock in composition}
+                if previous_symbols:
+                    entered = current_symbols - previous_symbols
+                    exited = previous_symbols - current_symbols
+                    for symbol in entered:
+                        stock = next(s for s in composition if s.symbol == symbol)
+                        changes.append(CompositionChange(
+                            date=current_date,
+                            symbol=symbol,
+                            company_name=stock.company_name,
+                            change_type="entered",
+                            previous_weight_percent=0.0,
+                            new_weight_percent=stock.weight_percent
+                        ))
                     
-                    if previous_symbols:
-                        entered = current_symbols - previous_symbols
-                        exited = previous_symbols - current_symbols
-                        for symbol in entered:
-                            stock = next(s for s in composition if s.symbol == symbol)
-                            changes.append(CompositionChange(
-                                date=current_date,
-                                symbol=symbol,
-                                company_name=stock.company_name,
-                                change_type="entered",
-                                previous_weight_percent=0.0,
-                                new_weight_percent=stock.weight_percent
-                            ))
-                        
-                        for symbol in exited:
-                            changes.append(CompositionChange(
-                                date=current_date,
-                                symbol=symbol,
-                                company_name="Unknown",
-                                change_type="exited",
-                                previous_weight_percent=100.0 / TOP_COMPANIES_COUNT,
-                                new_weight_percent=0.0
-                            ))
-                    
-                    previous_symbols = current_symbols
+                    for symbol in exited:
+                        changes.append(CompositionChange(
+                            date=current_date,
+                            symbol=symbol,
+                            company_name="Unknown",
+                            change_type="exited",
+                            previous_weight_percent=100.0 / TOP_COMPANIES_COUNT,
+                            new_weight_percent=0.0
+                        ))
+                
+                previous_symbols = current_symbols
             
             current_date += timedelta(days=1)
         

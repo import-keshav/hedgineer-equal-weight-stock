@@ -1,12 +1,12 @@
 # Hedgineer Equal Weight Stock Index
 
-A FastAPI application that tracks and manages a custom equal-weighted stock index comprising the top 100 US stocks by daily market capitalization, as per assignment requirements.
+A FastAPI application that tracks and manages a custom equal-weighted stock index comprising the top 500 US stocks by daily market capitalization, as per assignment requirements.
 
 ## Overview
 
 This system implements an equal-weight index that:
-- Fetches top 100 companies by market cap daily
-- Assigns equal 1% weight to each company
+- Fetches top 500 companies by market cap daily
+- Assigns equal 0.2% weight to each company
 - Provides REST APIs for index construction and analysis
 - Uses multiple data sources with fallback strategy
 - Runs automated daily data ingestion
@@ -324,16 +324,33 @@ pytest tests/
 ```
 
 ### Docker Setup
+
+⚠️ **Important**: When the server starts, it automatically builds the index for the last 30 days with 500 companies. This process takes **2-3 minutes** to complete. The API endpoints will be available once the initial index building is finished.
+
 ```bash
 # Start the application
 docker-compose up -d
 
-# View logs
+# View startup logs (shows index building progress)
 docker-compose logs -f app
+
+# The logs will show:
+# 🚀 Starting initial data backfill and index building...
+# ⏱️  This process may take 2-3 minutes for 500 companies over 30 days
+# 📊 Step 1/2: Fetching stock data...
+# 📈 Step 2/2: Building index compositions and performance...
+# ✅ Index building completed: X compositions built for Y trading days
+# 🎉 Initial setup completed! API endpoints are now ready.
 
 # Run tests
 docker run --rm -v $(pwd):/app -w /app --env DUCKDB_PATH=data/test_hedgineer.db hedgineer-equal-weight-stock-app python -m pytest tests/ -v
 ```
+
+**Startup Process:**
+1. **Database Migration** (< 1 second) - Creates tables if needed
+2. **Stock Data Fetching** (1-2 minutes) - Downloads 30 days of data for 500 companies
+3. **Index Building** (30-60 seconds) - Calculates compositions and performance metrics
+4. **API Ready** - All endpoints become available
 
 ### Database Schema & Migrations
 

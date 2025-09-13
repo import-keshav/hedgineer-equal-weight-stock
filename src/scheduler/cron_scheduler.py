@@ -3,21 +3,29 @@ from datetime import date, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from src.constants import DAILY_CRON_HOUR, DAILY_CRON_MINUTE, MARKET_CLOSED_WEEKENDS, DEFAULT_BACKFILL_DAYS
 from src.managers.index_data_dump_manager import IndexDataDumpManager
+from src.managers.build_index_manager import BuildIndexManager
 
 logger = logging.getLogger(__name__)
 
 
 class CronScheduler:
-    def __init__(self, index_data_dump_manager: IndexDataDumpManager):
+    def __init__(self, index_data_dump_manager: IndexDataDumpManager, build_index_manager: BuildIndexManager):
         self.manager = index_data_dump_manager
+        self.build_manager = build_index_manager
         self.scheduler = AsyncIOScheduler()
         
     async def start(self):
         logger.info("Starting cron scheduler")
-        await self._run_initial_backfill()
         self._schedule_daily_job()
         self.scheduler.start()
         logger.info(f"Cron job scheduled for daily execution at {DAILY_CRON_HOUR:02d}:{DAILY_CRON_MINUTE:02d}")
+        
+        # Run initial backfill in background (non-blocking)
+        self.scheduler.add_job(
+            self._run_initial_backfill,
+            'date',
+            id='initial_backfill'
+        )
         
     async def stop(self):
         logger.info("Stopping cron scheduler")
@@ -34,6 +42,9 @@ class CronScheduler:
         
     async def _run_initial_backfill(self):
         try:
+            logger.info("🚀 Starting initial data backfill and index building...")
+            logger.info("⏱️  This process may take 2-3 minutes for 500 companies over 30 days")
+            
             available_dates = await self.manager.get_available_dates()
             
             if not available_dates:
@@ -45,7 +56,21 @@ class CronScheduler:
                 logger.info(f"Last data date: {last_date}. Backfilling from {start_date}")
                 
             if start_date <= date.today():
+                # Step 1: Fetch and store stock data
+                logger.info("📊 Step 1/2: Fetching stock data...")
                 await self.manager.run_backfill(start_date, date.today())
+                
+                # Step 2: Build index compositions and performance
+                logger.info("📈 Step 2/2: Building index compositions and performance...")
+                index_start_date = date.today() - timedelta(days=DEFAULT_BACKFILL_DAYS)
+                result = await self.build_manager.build_index(index_start_date, date.today())
+                
+                if result.success:
+                    logger.info(f"✅ Index building completed: {result.total_compositions_built} compositions built for {result.trading_days} trading days")
+                else:
+                    logger.error(f"❌ Index building failed: {result.error_message}")
+                    
+                logger.info("🎉 Initial setup completed! API endpoints are now ready.")
             else:
                 logger.info("Data is up to date. No backfill needed")
                 

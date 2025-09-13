@@ -58,6 +58,11 @@ class IndexController:
                 media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 headers={"Content-Disposition": f"attachment; filename=index_data_{request.start_date}_{request.end_date or request.start_date}.xlsx"}
             )
+        
+        @self.router.get("/health")
+        async def health_check():
+            return {"status": "healthy", "service": "hedgineer-equal-weight-stock"}
+        
     
     def register_routes(self, app: FastAPI):
         app.include_router(self.router)

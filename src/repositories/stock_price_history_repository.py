@@ -1,27 +1,19 @@
-import os
 import asyncio
+import uuid
 from datetime import date, datetime
 from typing import List, Optional, Dict
-import duckdb
 from src.models.stock_price_history import StockPriceHistory, StockPriceHistoryCreate
 from src.dtos.index_result import IndexComposition, IndexPerformance
+from src.repositories.base_repository import BaseRepository
 
 
 class StockPriceHistoryRepository:
-    def __init__(self, db_path: Optional[str] = None):
-        self.db_path = db_path or os.getenv("DUCKDB_PATH", "data/hedgineer.db")
-        self.connection = None
-        self._ensure_db_directory()
-        self._initialize_connection()
+    def __init__(self, base_repository: BaseRepository):
+        self.base_repository = base_repository
     
-    def _ensure_db_directory(self):
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-    
-    def _initialize_connection(self):
-        try:
-            self.connection = duckdb.connect(self.db_path)
-        except Exception as e:
-            raise Exception(f"Failed to initialize DuckDB connection: {e}")
+    @property
+    def connection(self):
+        return self.base_repository.connection
     
     async def bulk_insert_stock_data(self, stock_data: List[StockPriceHistoryCreate]) -> int:
         if not stock_data:
@@ -39,9 +31,11 @@ class StockPriceHistoryRepository:
             VALUES (?, ?, ?, ?, ?, ?, ?);
             """
             
-            for i, stock in enumerate(stock_data):
+            for stock in stock_data:
+                # Generate UUID for unique ID
+                unique_id = str(uuid.uuid4())
                 values = [
-                    i + 1,
+                    unique_id,
                     stock.company_symbol,
                     stock.company_name,
                     float(stock.last_traded_price),
@@ -166,34 +160,39 @@ class StockPriceHistoryRepository:
         except Exception:
             return 0
     
-    async def persist_index_composition(self, compositions: List[IndexComposition]) -> bool:
+    async def insert_index_composition(self, compositions: List[IndexComposition]) -> bool:
+        """Insert index composition data (does not handle existing data)"""
         try:
             for comp in compositions:
                 insert_sql = """
                 INSERT INTO index_compositions 
-                (date, symbol, company_name, weight_percent, market_cap, price, return_percent)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (id, date, symbol, company_name, weight_percent, market_cap, price, return_percent, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """
+                # Generate UUID for unique ID
+                unique_id = str(uuid.uuid4())
                 await asyncio.to_thread(self.connection.execute, insert_sql, [
-                    comp.date, comp.symbol, comp.company_name, comp.weight_percent,
+                    unique_id, comp.date, comp.symbol, comp.company_name, comp.weight_percent,
                     comp.market_cap, comp.price, comp.return_percent
                 ])
             return True
         except Exception:
             return False
 
-    async def persist_index_performance(self, performance: List[IndexPerformance]) -> bool:
+    async def insert_index_performance(self, performance: List[IndexPerformance]) -> bool:
+        """Insert index performance data (does not handle existing data)"""
         try:
             for perf in performance:
                 insert_sql = """
                 INSERT INTO index_performance 
-                (date, daily_return_percent, cumulative_return_percent, index_value, companies_count)
-                VALUES (?, ?, ?, ?, ?)
+                (id, date, daily_return_percent, cumulative_return_percent, index_value, companies_count, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """
-                await asyncio.to_thread(self.connection.execute, insert_sql, [
-                    perf.date, perf.daily_return_percent, perf.cumulative_return_percent,
-                    perf.index_value, perf.companies_count
-                ])
+                # Generate UUID for unique ID
+                unique_id = str(uuid.uuid4())
+                values = [unique_id, perf.date, perf.daily_return_percent, perf.cumulative_return_percent, perf.index_value, perf.companies_count]
+                await asyncio.to_thread(self.connection.execute, insert_sql, values)
+            
             return True
         except Exception:
             return False
@@ -233,6 +232,7 @@ class StockPriceHistoryRepository:
             """
             result = await asyncio.to_thread(self.connection.execute, query_sql, [start_date, end_date])
             rows = result.fetchall()
+            
             return [
                 IndexPerformance(
                     date=row[0],
@@ -254,7 +254,3 @@ class StockPriceHistoryRepository:
             return row[0] if row and row[0] else None
         except Exception:
             return None
-
-    def close(self):
-        if self.connection:
-            self.connection.close()

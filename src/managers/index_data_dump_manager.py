@@ -46,16 +46,19 @@ class IndexDataDumpManager:
         current_date = start_date
         
         while current_date <= end_date:
-            if current_date.weekday() < 5:
-                result = await self.run_daily_dump(current_date)
-                results.append(result)
+            if current_date.weekday() >= 5:
+                current_date += timedelta(days=1)
+                continue
+            
+            result = await self.run_daily_dump(current_date)
+            results.append(result)
             current_date += timedelta(days=1)
         
         return results
     
     async def validate_data(self, target_date: date) -> ValidationResult:
         try:
-            stock_count = await self.stock_history_service.repository.get_stocks_count_by_date(target_date)
+            stock_count = await self.stock_history_service.get_stocks_count_by_date(target_date)
             
             return ValidationResult(
                 date=target_date,
@@ -76,6 +79,6 @@ class IndexDataDumpManager:
     
     async def get_available_dates(self) -> List[date]:
         try:
-            return await self.stock_history_service.repository.get_available_dates()
+            return await self.stock_history_service.get_available_dates()
         except Exception:
             return []

@@ -1,11 +1,16 @@
 import pytest
 import asyncio
+import os
+import tempfile
+import shutil
 from datetime import date, timedelta
 from unittest.mock import AsyncMock, Mock
 from src.managers.index_manager import IndexManager
 from src.managers.build_index_manager import BuildIndexManager
 from src.services.redis_service import RedisService
 from src.services.index_service import IndexService
+from src.repositories.base_repository import BaseRepository
+from src.repositories.stock_price_history_repository import StockPriceHistoryRepository
 from src.dtos.index_result import IndexComposition, IndexPerformance, IndexBuildResult
 
 
@@ -14,6 +19,38 @@ def event_loop():
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
+
+
+@pytest.fixture(scope="session")
+def test_db_path():
+    """Create a temporary database file for testing"""
+    temp_dir = tempfile.mkdtemp()
+    db_path = os.path.join(temp_dir, "test_hedgineer.db")
+    yield db_path
+    # Cleanup
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def test_base_repository(test_db_path):
+    """Create a BaseRepository with test database"""
+    # Set environment variable for test database
+    os.environ["TESTING"] = "1"
+    os.environ["DUCKDB_PATH"] = test_db_path
+    
+    base_repo = BaseRepository(db_path=test_db_path)
+    yield base_repo
+    base_repo.close()
+    
+    # Clean up environment
+    os.environ.pop("TESTING", None)
+    os.environ.pop("DUCKDB_PATH", None)
+
+
+@pytest.fixture
+def test_stock_repository(test_base_repository):
+    """Create a StockPriceHistoryRepository with test database"""
+    return StockPriceHistoryRepository(test_base_repository)
 
 
 

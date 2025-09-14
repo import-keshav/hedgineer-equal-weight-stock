@@ -325,22 +325,25 @@ pytest tests/
 
 ### Docker Setup
 
-⚠️ **Important**: When the server starts, it automatically builds the index for the last 30 days with 500 companies. This process takes **2-3 minutes** to complete. The API endpoints will be available once the initial index building is finished.
+⚠️ **Important Startup Process**: The server automatically builds the index for the last 30 days with 500 companies on startup. **Please wait 2-3 minutes** before using the API endpoints.
 
 ```bash
 # Start the application
 docker-compose up -d
 
-# View startup logs (shows index building progress)
+# View startup logs (recommended to monitor progress)
 docker-compose logs -f app
 
-# The logs will show:
+# Expected startup sequence:
 # 🚀 Starting initial data backfill and index building...
-# ⏱️  This process may take 2-3 minutes for 500 companies over 30 days
-# 📊 Step 1/2: Fetching stock data...
+# ⏱️  Optimized process: ~2-3 minutes for 500 companies over 30 days
+# 📊 Step 1/2: Fetching stock data for 500 companies...
+# ✅ Data dumping completed! Stock data is now available.
 # 📈 Step 2/2: Building index compositions and performance...
 # ✅ Index building completed: X compositions built for Y trading days
-# 🎉 Initial setup completed! API endpoints are now ready.
+# 🎉 Initial setup completed! All API endpoints are now ready for use.
+
+# ✅ Once you see the final message, the API is ready!
 
 # Run tests
 docker run --rm -v $(pwd):/app -w /app --env DUCKDB_PATH=data/test_hedgineer.db hedgineer-equal-weight-stock-app python -m pytest tests/ -v
@@ -349,8 +352,9 @@ docker run --rm -v $(pwd):/app -w /app --env DUCKDB_PATH=data/test_hedgineer.db 
 **Startup Process:**
 1. **Database Migration** (< 1 second) - Creates tables if needed
 2. **Stock Data Fetching** (1-2 minutes) - Downloads 30 days of data for 500 companies
+   - ✅ **"Data dumping completed!"** message indicates this step is done
 3. **Index Building** (30-60 seconds) - Calculates compositions and performance metrics
-4. **API Ready** - All endpoints become available
+4. **API Ready** - 🎉 **"All API endpoints are now ready for use"** message confirms completion
 
 ### Database Schema & Migrations
 

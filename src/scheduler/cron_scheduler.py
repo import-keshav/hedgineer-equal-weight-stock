@@ -1,7 +1,7 @@
 import logging
 from datetime import date, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from src.constants import DAILY_CRON_HOUR, DAILY_CRON_MINUTE, MARKET_CLOSED_WEEKENDS, DEFAULT_BACKFILL_DAYS
+from src.constants import DAILY_CRON_HOUR, DAILY_CRON_MINUTE, MARKET_CLOSED_WEEKENDS, DEFAULT_BACKFILL_DAYS, TOP_COMPANIES_COUNT
 from src.managers.index_data_dump_manager import IndexDataDumpManager
 from src.managers.build_index_manager import BuildIndexManager
 
@@ -42,37 +42,29 @@ class CronScheduler:
         
     async def _run_initial_backfill(self):
         try:
-            logger.info("🚀 Starting initial data backfill and index building...")
-            logger.info("⏱️  This process may take 2-3 minutes for 500 companies over 30 days")
+            logger.info("Starting initial data backfill and index building...")
             
             available_dates = await self.manager.get_available_dates()
             
             if not available_dates:
                 start_date = date.today() - timedelta(days=DEFAULT_BACKFILL_DAYS)
-                logger.info(f"No existing data found. Starting {DEFAULT_BACKFILL_DAYS}-day backfill from {start_date}")
             else:
                 last_date = max(available_dates)
                 start_date = last_date + timedelta(days=1)
-                logger.info(f"Last data date: {last_date}. Backfilling from {start_date}")
+                if start_date > date.today():
+                    start_date = date.today()
                 
-            if start_date <= date.today():
-                # Step 1: Fetch and store stock data
-                logger.info("📊 Step 1/2: Fetching stock data...")
-                await self.manager.run_backfill(start_date, date.today())
-                
-                # Step 2: Build index compositions and performance
-                logger.info("📈 Step 2/2: Building index compositions and performance...")
-                index_start_date = date.today() - timedelta(days=DEFAULT_BACKFILL_DAYS)
-                result = await self.build_manager.build_index(index_start_date, date.today())
-                
-                if result.success:
-                    logger.info(f"✅ Index building completed: {result.total_compositions_built} compositions built for {result.trading_days} trading days")
-                else:
-                    logger.error(f"❌ Index building failed: {result.error_message}")
-                    
-                logger.info("🎉 Initial setup completed! API endpoints are now ready.")
+            await self.manager.run_backfill(start_date, date.today())
+            
+            index_start_date = date.today() - timedelta(days=DEFAULT_BACKFILL_DAYS)
+            result = await self.build_manager.build_index(index_start_date, date.today())
+            
+            if result.success:
+                logger.info(f"Index building completed: {result.total_compositions_built} compositions built")
             else:
-                logger.info("Data is up to date. No backfill needed")
+                logger.error(f"Index building failed: {result.error_message}")
+                
+            logger.info("Initial setup completed! API endpoints are ready.")
                 
         except Exception as e:
             logger.error(f"Error during initial backfill: {e}")
@@ -82,14 +74,12 @@ class CronScheduler:
             today = date.today()
             
             if today.weekday() in MARKET_CLOSED_WEEKENDS:
-                logger.info(f"Skipping data ingestion for {today} - market closed on weekends")
                 return
                 
-            logger.info(f"Running daily data ingestion for {today}")
             result = await self.manager.run_daily_dump(today)
             
             if result.success:
-                logger.info(f"Daily ingestion completed: {result.records_processed} records in {result.execution_time_seconds}s")
+                logger.info(f"Daily ingestion completed: {result.records_processed} records")
             else:
                 logger.error(f"Daily ingestion failed: {result.error_message}")
                 

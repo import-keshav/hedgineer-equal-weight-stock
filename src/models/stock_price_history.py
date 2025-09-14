@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, validator
 
 
 class StockPriceHistory(BaseModel):
-    id: Optional[int] = Field(None)
+    id: Optional[str] = Field(None)
     company_symbol: str = Field(..., max_length=30)
     company_name: str = Field(..., max_length=100)
     last_traded_price: float = Field(...)
@@ -50,7 +50,7 @@ class StockPriceHistoryCreate(BaseModel):
 
 
 class StockPriceHistoryResponse(BaseModel):
-    id: int
+    id: str
     company_symbol: str
     company_name: str
     last_traded_price: float

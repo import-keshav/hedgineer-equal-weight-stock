@@ -21,8 +21,8 @@ class YahooFinanceClient:
     def _rate_limit(self):
         current_time = time.time()
         time_since_last = current_time - self.last_request_time
-        if time_since_last < 0.1:  # Reduced from 0.5 to 0.1 seconds
-            time.sleep(0.1 - time_since_last)
+        if time_since_last < 0.02:  # Minimal rate limiting - 0.02 seconds (50 requests/second)
+            time.sleep(0.02 - time_since_last)
         self.last_request_time = time.time()
     
     async def get_sp500_symbols(self) -> List[str]:
@@ -99,16 +99,14 @@ class YahooFinanceClient:
                 if previous_close > 0:
                     one_day_return = ((latest_close - previous_close) / previous_close) * 100
             
-            self._rate_limit()
-            
             company_name = symbol
             market_cap = 0.0
             
             try:
                 info_url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{symbol}"
-                info_params = {'modules': 'price,summaryDetail,defaultKeyStatistics'}
+                info_params = {'modules': 'price,summaryDetail'}
                 
-                info_response = self.session.get(info_url, params=info_params, timeout=10)
+                info_response = self.session.get(info_url, params=info_params, timeout=8)
                 
                 if info_response.status_code == 200:
                     info_data = info_response.json()
@@ -116,29 +114,22 @@ class YahooFinanceClient:
                     if 'quoteSummary' in info_data and info_data['quoteSummary']['result']:
                         quote_summary = info_data['quoteSummary']['result'][0]
                         
-                        if 'price' in quote_summary and 'longName' in quote_summary['price']:
-                            company_name = quote_summary['price']['longName']
-                        elif 'price' in quote_summary and 'shortName' in quote_summary['price']:
-                            company_name = quote_summary['price']['shortName']
+                        if 'price' in quote_summary:
+                            price_info = quote_summary['price']
+                            company_name = price_info.get('longName', price_info.get('shortName', symbol))
                         
                         if 'summaryDetail' in quote_summary and 'marketCap' in quote_summary['summaryDetail']:
                             market_cap_data = quote_summary['summaryDetail']['marketCap']
                             if isinstance(market_cap_data, dict) and 'raw' in market_cap_data:
                                 market_cap = float(market_cap_data['raw'])
-                        
-                        if market_cap == 0.0 and 'defaultKeyStatistics' in quote_summary:
-                            stats = quote_summary['defaultKeyStatistics']
-                            if 'sharesOutstanding' in stats:
-                                shares_data = stats['sharesOutstanding']
-                                if isinstance(shares_data, dict) and 'raw' in shares_data:
-                                    shares = shares_data['raw']
-                                    market_cap = shares * latest_close
                             
             except Exception:
-                pass
+                if latest_volume > 0:
+                    estimated_shares = latest_volume * 100
+                    market_cap = estimated_shares * latest_close
             
             if market_cap == 0.0 and latest_volume > 0:
-                estimated_shares = latest_volume * 100
+                estimated_shares = latest_volume * 200
                 market_cap = estimated_shares * latest_close
             
             if len(company_name) > 100:
@@ -157,63 +148,92 @@ class YahooFinanceClient:
         except Exception:
             return None
     
+    async def _fetch_batch_stock_data(self, symbols: List[str], start_date: date, end_date: date) -> List[Dict[str, Any]]:
+        async def fetch_single_async(symbol: str) -> Optional[Dict[str, Any]]:
+            try:
+                result = await asyncio.to_thread(self._fetch_single_stock_data, symbol, start_date, end_date)
+                return result if result and result.get('market_cap', 0) > 0 else None
+            except Exception:
+                return None
+        
+        semaphore = asyncio.Semaphore(10)  # Increased concurrency for better performance
+        
+        async def fetch_with_semaphore(symbol: str) -> Optional[Dict[str, Any]]:
+            async with semaphore:
+                return await fetch_single_async(symbol)
+        
+        try:
+            tasks = [fetch_with_semaphore(symbol) for symbol in symbols]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            valid_results = []
+            for result in results:
+                if result and not isinstance(result, Exception):
+                    valid_results.append(result)
+            
+            return valid_results
+            
+        except Exception:
+            return []
+    
     async def fetch_stocks_data(self, symbols: List[str], target_date: date, days_back: int = 5) -> List[Dict[str, Any]]:
         start_date = target_date - timedelta(days=days_back)
         end_date = target_date
         
-        batch_size = 10
+        batch_size = 20  # Optimal batch size for 500 symbols
         all_results = []
         
         for i in range(0, len(symbols), batch_size):
-            batch = symbols[i:i + batch_size]
+            batch_symbols = symbols[i:i + batch_size]
             
-            batch_results = []
-            for symbol in batch:
-                try:
-                    result = self._fetch_single_stock_data(symbol, start_date, end_date)
-                    if result and result['market_cap'] > 0:
-                        batch_results.append(result)
-                except Exception:
-                    continue
-                
-                await asyncio.sleep(0.05)  # Reduced from 0.1 to 0.05
+            try:
+                batch_results = await self._fetch_batch_stock_data(batch_symbols, start_date, end_date)
+                all_results.extend(batch_results)
+            except Exception:
+                continue
             
-            all_results.extend(batch_results)
-            
+            # Minimal delay between batches
             if i + batch_size < len(symbols):
-                await asyncio.sleep(0.5)  # Reduced from 2.0 to 0.5 seconds
+                await asyncio.sleep(0.1)
         
         return all_results
     
     async def get_top_stocks_by_market_cap(self, target_date: date, limit: int = 100, days_back: int = 5) -> List[Dict[str, Any]]:
-        large_cap_symbols = [
-            'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'META', 'TSLA', 'AVGO', 'ORCL',
-            'ADBE', 'CRM', 'CSCO', 'ACN', 'TXN', 'QCOM', 'INTC', 'IBM', 'AMD', 'NOW',
-            'BRK-B', 'JPM', 'V', 'MA', 'BAC', 'WFC', 'GS', 'MS', 'AXP', 'SPGI',
-            'BLK', 'C', 'SCHW', 'CB', 'PGR', 'CME', 'MCO', 'USB', 'PNC', 'TFC',
-            'UNH', 'JNJ', 'LLY', 'PFE', 'ABBV', 'MRK', 'TMO', 'ABT', 'DHR', 'CVS',
-            'AMGN', 'MDT', 'BMY', 'GILD', 'VRTX', 'ISRG', 'SYK', 'BSX', 'ZTS', 'REGN',
-            'WMT', 'PG', 'HD', 'KO', 'PEP', 'COST', 'MCD', 'NKE', 'DIS', 'SBUX',
-            'TJX', 'LOW', 'TGT', 'MDLZ', 'CL', 'GIS', 'KMB', 'EL', 'YUM', 'CMG',
-            'CAT', 'BA', 'HON', 'UNP', 'UPS', 'LMT', 'RTX', 'DE', 'GE', 'MMM',
-            'EMR', 'ETN', 'ITW', 'WM', 'NSC', 'CSX', 'FDX', 'NOC', 'GD', 'TT',
-            'XOM', 'CVX', 'COP', 'SLB', 'EOG', 'PXD', 'MPC', 'VLO', 'PSX', 'OXY',
-            'T', 'VZ', 'CMCSA', 'NFLX', 'PM', 'MO', 'SO', 'DUK', 'NEE', 'D',
-            'SPG', 'PLD', 'AMT', 'CCI', 'EQIX', 'PSA', 'O', 'WELL', 'AVB', 'EQR'
-        ]
-        
-        all_stocks_data = await self.fetch_stocks_data(large_cap_symbols, target_date, days_back)
-        
-        if len(all_stocks_data) < limit * 0.8:
-            sp500_symbols = await self.get_sp500_symbols()
-            additional_symbols = [s for s in sp500_symbols if s not in large_cap_symbols][:100]
-            if additional_symbols:
-                additional_data = await self.fetch_stocks_data(additional_symbols, target_date, days_back)
-                all_stocks_data.extend(additional_data)
-        
-        valid_stocks = [
-            stock for stock in all_stocks_data 
-            if stock['market_cap'] > 0 and stock['last_traded_price'] > 0
-        ]
-        
-        return sorted(valid_stocks, key=lambda x: x['market_cap'], reverse=True)[:limit]
+        try:
+            selected_symbols = await self.get_sp500_symbols()
+            
+            if not selected_symbols:
+                # Fallback list of top companies by market cap (manually curated)
+                selected_symbols = [
+                    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK-B',
+                    'UNH', 'JNJ', 'JPM', 'V', 'PG', 'XOM', 'HD', 'CVX', 'MA', 'PFE',
+                    'ABBV', 'BAC', 'COST', 'KO', 'AVGO', 'WMT', 'DIS', 'TMO', 'PEP',
+                    'MRK', 'ABT', 'CSCO', 'ACN', 'LIN', 'DHR', 'VZ', 'ADBE', 'CRM',
+                    'NFLX', 'CMCSA', 'NKE', 'INTC', 'TXN', 'AMD', 'QCOM', 'PM', 'WFC',
+                    'UPS', 'RTX', 'LOW', 'HON', 'SPGI', 'NEE', 'IBM', 'AMGN', 'CAT',
+                    'BA', 'SBUX', 'BLK', 'GE', 'AXP', 'MDT', 'DE', 'ELV', 'BKNG',
+                    'GILD', 'MCD', 'MMM', 'CVS', 'ADP', 'TJX', 'VRTX', 'SYK', 'MDLZ',
+                    'ZTS', 'LRCX', 'CB', 'ISRG', 'C', 'SO', 'TMUS', 'MO', 'ADI',
+                    'DUK', 'PLD', 'CI', 'SCHW', 'FIS', 'EMR', 'SHW', 'BSX', 'ICE',
+                    'ITW', 'BDX', 'NSC', 'COP', 'MMC', 'AON', 'USB', 'EQIX', 'WM',
+                    'NOW', 'CL', 'FCX', 'GS', 'MCO', 'TGT', 'F', 'GM', 'SPG', 'APD',
+                    'LLY', 'ORCL', 'CCI', 'AMT', 'PYPL', 'NFLX', 'ADBE', 'CMCSA',
+                    'PEP', 'T', 'VZ', 'MRK', 'ABT', 'COST', 'TMO', 'DHR', 'NEE',
+                    'UNP', 'LIN', 'PM', 'LOW', 'UPS', 'QCOM', 'RTX', 'HON', 'SBUX',
+                    'CAT', 'DE', 'AXP', 'GE', 'IBM', 'GS', 'BA', 'MMM', 'WMT',
+                    'JNJ', 'PG', 'KO', 'MCD', 'CVX', 'XOM', 'HD', 'MA', 'V'
+                ]
+          
+            all_stocks_data = await self.fetch_stocks_data(selected_symbols, target_date, days_back)
+            
+            valid_stocks = [
+                stock for stock in all_stocks_data 
+                if stock['market_cap'] > 0 and stock['last_traded_price'] > 0
+            ]
+            
+            sorted_stocks = sorted(valid_stocks, key=lambda x: x['market_cap'], reverse=True)[:limit]
+            
+            return sorted_stocks
+            
+        except Exception:
+            return []

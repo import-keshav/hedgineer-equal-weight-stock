@@ -1,4 +1,4 @@
-TOP_COMPANIES_COUNT = 500  # Production setting
+TOP_COMPANIES_COUNT = 130  # Number of companies in equal-weight index
 DEFAULT_BACKFILL_DAYS = 30
 MARKET_CLOSED_WEEKENDS = [5, 6]
 DAILY_CRON_HOUR = 0
